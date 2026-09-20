@@ -1,0 +1,114 @@
+# main に入ったらビルドして S3 へ同期し、CloudFront のキャッシュを消す。
+#
+# 認証はアクセスキーではなく OIDC を使う。GitHub が発行した短命トークンで
+# IAM ロールを引き受けるので、長期の鍵をどこにも置かない。
+# ロールは infra/github-oidc.yaml が作る。
+#
+# 事前に必要な設定（リポジトリの Settings > Secrets and variables > Actions > Variables）:
+#   AWS_ROLE_ARN       infra/github-oidc.yaml の出力 DeployRoleArn
+#   AWS_REGION         ap-northeast-1
+#   S3_BUCKET          配信元のバケット名
+#   CLOUDFRONT_DIST_ID infra/site.yaml の出力 DistributionId
+# 値に秘密は無いので Secrets ではなく Variables で足りる。
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  # 内容を変えずに配信だけやり直したいときのため
+  workflow_dispatch:
+
+# 同時に走らせない。後から来たものを優先し、進行中のものは止める。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write # OIDC トークンの発行に必要
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://etaolab.com/
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # 壊れたものを配信しないよう、デプロイの前に check を通す。
+      # ここを飛ばさないこと。
+      - name: check
+        run: |
+          npx oxlint
+          npx tsc -b
+          npm test
+          node scripts/validate-infra.mjs
+
+      - name: build
+        run: npm run build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: gha-deploy-${{ github.run_id }}
+
+      # ハッシュ付きのファイル名を持つ資産は長期キャッシュ。
+      # 中身が変われば名前が変わるので、消す必要がない。
+      - name: assets を同期（長期キャッシュ）
+        run: |
+          aws s3 sync dist/ "s3://${{ vars.S3_BUCKET }}/" \
+            --delete \
+            --exclude "*" \
+            --include "assets/*" \
+            --cache-control "public, max-age=31536000, immutable"
+
+      # HTML と画像は名前が変わらないので、都度取り直させる。
+      - name: それ以外を同期（都度検証）
+        run: |
+          aws s3 sync dist/ "s3://${{ vars.S3_BUCKET }}/" \
+            --delete \
+            --exclude "assets/*" \
+            --cache-control "public, max-age=0, must-revalidate"
+
+      # 名前が変わらないファイルだけ消せば足りる。
+      # 全消し (/*) は無料枠(1000パス/月)を早く使い切るので避ける。
+      - name: CloudFront のキャッシュを消す
+        run: |
+          ID=$(aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.CLOUDFRONT_DIST_ID }}" \
+            --paths "/" "/index.html" "/favicon.svg" \
+            --query 'Invalidation.Id' --output text)
+          echo "invalidation: $ID"
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${{ vars.CLOUDFRONT_DIST_ID }}" --id "$ID"
+
+      # 配信後に実際の応答を確かめる。ここが通らなければ失敗として扱う。
+      - name: 公開状態を確認する
+        run: |
+          set -e
+          echo "--- HTTP は HTTPS へ飛ぶか ---"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -I http://etaolab.com/)
+          echo "http://etaolab.com/ -> $code"
+          case "$code" in 301|302|307|308) ;; *) echo "❌ HTTPS へリダイレクトされていない"; exit 1;; esac
+
+          echo "--- セキュリティヘッダが付いているか ---"
+          headers=$(curl -sI https://etaolab.com/)
+          for h in strict-transport-security x-content-type-options content-security-policy referrer-policy; do
+            echo "$headers" | grep -qi "^$h:" && echo "  ✅ $h" || { echo "  ❌ $h が無い"; exit 1; }
+          done
+
+          echo "--- SPA のルートが引けるか ---"
+          code=$(curl -s -o /dev/null -w '%{http_code}' https://etaolab.com/works/raspberry-pi)
+          echo "/works/raspberry-pi -> $code"
+          [ "$code" = "200" ] || { echo "❌ 直リンクが 200 にならない"; exit 1; }
