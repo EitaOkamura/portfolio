@@ -1,0 +1,275 @@
+[
+  {
+    "from": "images/Architecture/Junior1.png",
+    "to": "images/Architecture/Junior1.webp",
+    "before": 13198727,
+    "after": 615528,
+    "width": 2400
+  },
+  {
+    "from": "images/Architecture/Sophomore.png",
+    "to": "images/Architecture/Sophomore.webp",
+    "before": 9302107,
+    "after": 465586,
+    "width": 2400
+  },
+  {
+    "from": "images/Architecture/Junior2.png",
+    "to": "images/Architecture/Junior2.webp",
+    "before": 6425301,
+    "after": 384478,
+    "width": 2400
+  },
+  {
+    "from": "images/RaspberryPi/raspi9.jpg",
+    "to": "images/RaspberryPi/raspi9.webp",
+    "before": 1208876,
+    "after": 211342,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/micon5.jpg",
+    "to": "images/poriteku/micon5.webp",
+    "before": 1104181,
+    "after": 207450,
+    "width": 1400
+  },
+  {
+    "from": "images/RaspberryPi/raspi10.jpg",
+    "to": "images/RaspberryPi/raspi10.webp",
+    "before": 1053854,
+    "after": 139410,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/network4.jpg",
+    "to": "images/poriteku/network4.webp",
+    "before": 1019720,
+    "after": 162050,
+    "width": 1400
+  },
+  {
+    "from": "images/RaspberryPi/raspi1.jpg",
+    "to": "images/RaspberryPi/raspi1.webp",
+    "before": 980416,
+    "after": 156628,
+    "width": 1400
+  },
+  {
+    "from": "images/RaspberryPi/raspi11.jpg",
+    "to": "images/RaspberryPi/raspi11.webp",
+    "before": 971773,
+    "after": 114590,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/micon4.jpg",
+    "to": "images/poriteku/micon4.webp",
+    "before": 930106,
+    "after": 158044,
+    "width": 1400
+  },
+  {
+    "from": "images/RaspberryPi/raspi8.jpg",
+    "to": "images/RaspberryPi/raspi8.webp",
+    "before": 902906,
+    "after": 96094,
+    "width": 1400
+  },
+  {
+    "from": "images/etasportfolio/PCimage.png",
+    "to": "images/etasportfolio/PCimage.webp",
+    "before": 875427,
+    "after": 138020,
+    "width": 1600
+  },
+  {
+    "from": "images/poriteku/micon1.jpg",
+    "to": "images/poriteku/micon1.webp",
+    "before": 819264,
+    "after": 132994,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/micon2.jpg",
+    "to": "images/poriteku/micon2.webp",
+    "before": 806291,
+    "after": 135840,
+    "width": 1400
+  },
+  {
+    "from": "images/RaspberryPi/raspi2.jpg",
+    "to": "images/RaspberryPi/raspi2.webp",
+    "before": 791517,
+    "after": 116666,
+    "width": 1400
+  },
+  {
+    "from": "images/RaspberryPi/raspi7.jpg",
+    "to": "images/RaspberryPi/raspi7.webp",
+    "before": 787667,
+    "after": 97142,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/sokutei9.jpg",
+    "to": "images/poriteku/sokutei9.webp",
+    "before": 764122,
+    "after": 115380,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/micon7.jpg",
+    "to": "images/poriteku/micon7.webp",
+    "before": 762876,
+    "after": 102454,
+    "width": 1400
+  },
+  {
+    "from": "images/etasportfolio/smartPhone.png",
+    "to": "images/etasportfolio/smartPhone.webp",
+    "before": 760900,
+    "after": 147426,
+    "width": 625
+  },
+  {
+    "from": "images/poriteku/network3.jpg",
+    "to": "images/poriteku/network3.webp",
+    "before": 720603,
+    "after": 106976,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/sokutei11.jpg",
+    "to": "images/poriteku/sokutei11.webp",
+    "before": 614868,
+    "after": 101558,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/sokutei17.jpg",
+    "to": "images/poriteku/sokutei17.webp",
+    "before": 612674,
+    "after": 73568,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/handa1.jpg",
+    "to": "images/poriteku/handa1.webp",
+    "before": 560585,
+    "after": 75508,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/network2.jpg",
+    "to": "images/poriteku/network2.webp",
+    "before": 553033,
+    "after": 62128,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/sokutei8.jpg",
+    "to": "images/poriteku/sokutei8.webp",
+    "before": 540232,
+    "after": 101626,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/LAN1.jpg",
+    "to": "images/poriteku/LAN1.webp",
+    "before": 513567,
+    "after": 39392,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/network1.jpg",
+    "to": "images/poriteku/network1.webp",
+    "before": 506068,
+    "after": 68726,
+    "width": 1400
+  },
+  {
+    "from": "images/poriteku/sokutei7.jpg",
+    "to": "images/poriteku/sokutei7.webp",
+    "before": 475953,
+    "after": 69650,
+    "width": 1400
+  },
+  {
+    "from": "images/computer_tokui_boy.png",
+    "to": "images/computer_tokui_boy.webp",
+    "before": 470444,
+    "after": 37936,
+    "width": 640
+  },
+  {
+    "from": "images/RaspberryPi/opencv2.jpg",
+    "to": "images/RaspberryPi/opencv2.webp",
+    "before": 238243,
+    "after": 38514,
+    "width": 1400
+  },
+  {
+    "from": "images/etasportfolio/evaluation.png",
+    "to": "images/etasportfolio/evaluation.webp",
+    "before": 144431,
+    "after": 42742,
+    "width": 1600
+  },
+  {
+    "from": "images/RaspberryPi/opencv_hand2.jpg",
+    "to": "images/RaspberryPi/opencv_hand2.webp",
+    "before": 74805,
+    "after": 10522,
+    "width": 1400
+  },
+  {
+    "from": "images/RaspberryPi/opencv_hand1.jpg",
+    "to": "images/RaspberryPi/opencv_hand1.webp",
+    "before": 73479,
+    "after": 10454,
+    "width": 1400
+  },
+  {
+    "from": "images/etasportfolio/AWSArchitecture.png",
+    "to": "images/etasportfolio/AWSArchitecture.webp",
+    "before": 69000,
+    "after": 78506,
+    "width": 1600
+  },
+  {
+    "from": "images/RaspberryPi/opencv1.jpg",
+    "to": "images/RaspberryPi/opencv1.webp",
+    "before": 37686,
+    "after": 24368,
+    "width": 960
+  },
+  {
+    "from": "images/books.png",
+    "to": "images/books.webp",
+    "before": 8538,
+    "after": 3692,
+    "width": 256
+  },
+  {
+    "from": "images/graduate.png",
+    "to": "images/graduate.webp",
+    "before": 7476,
+    "after": 2880,
+    "width": 256
+  },
+  {
+    "from": "images/ArchitectureIcon.png",
+    "to": "images/ArchitectureIcon.webp",
+    "before": 7459,
+    "after": 3102,
+    "width": 256
+  },
+  {
+    "from": "images/ITicon.png",
+    "to": "images/ITicon.webp",
+    "before": 4380,
+    "after": 1174,
+    "width": 256
+  }
+]
