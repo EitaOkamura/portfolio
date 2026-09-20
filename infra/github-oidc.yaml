@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  GitHub Actions から AWS へ、アクセスキーを置かずにデプロイするための
+  OIDC 連携。GitHub が発行する短命トークンで IAM ロールを引き受ける。
+
+# なぜ OIDC にするか
+#   アクセスキー(AKIA...)を GitHub Secrets に置く方式は、鍵が漏れたときに
+#   取り消すまで使われ続ける。OIDC なら鍵自体が存在せず、発行されるのは
+#   数分で失効するトークンだけ。さらに「どのリポジトリの、どのブランチか」を
+#   信頼ポリシーで縛れる。
+#
+# 費用: IAM と OIDC プロバイダに課金は無い。
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Description: GitHub のユーザ名または organization 名 (例 EitaOkamura)
+  GitHubRepo:
+    Type: String
+    Description: リポジトリ名 (例 portfolio)
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: デプロイを許可するブランチ。ここ以外からは引き受けられない
+  SiteBucketName:
+    Type: String
+    Description: デプロイ先の S3 バケット名
+  DistributionId:
+    Type: String
+    Description: キャッシュ削除の対象となる CloudFront ディストリビューション ID
+  CreateOidcProvider:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: >
+      アカウントに GitHub の OIDC プロバイダが未作成なら true。
+      既に他のリポジトリ用に作ってある場合は false にする
+      (1アカウントに1つしか作れない)。
+
+Conditions:
+  ShouldCreateProvider: !Equals [!Ref CreateOidcProvider, 'true']
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # AWS 側で検証されるため現在この値は実質使われないが、項目としては必須。
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${GitHubRepo}-github-deploy'
+      Description: !Sub 'GitHub Actions (${GitHubOwner}/${GitHubRepo}) からのデプロイ用'
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - ShouldCreateProvider
+                - !Ref GitHubOidcProvider
+                - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com'
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'token.actions.githubusercontent.com:aud': sts.amazonaws.com
+                # ここを緩めないこと。sub を絞らないと、他人のリポジトリからでも
+                # このロールを引き受けられてしまう。
+                'token.actions.githubusercontent.com:sub': !Sub 'repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+      Policies:
+        - PolicyName: deploy-site
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SyncObjects
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${SiteBucketName}/*'
+              - Sid: ListForSync
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${SiteBucketName}'
+              - Sid: InvalidateCache
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetInvalidation
+                Resource: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistributionId}'
+
+Outputs:
+  DeployRoleArn:
+    Description: GitHub Actions の aws-actions/configure-aws-credentials に渡す値
+    Value: !GetAtt DeployRole.Arn

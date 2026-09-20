@@ -1,0 +1,246 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  ポートフォリオサイトの配信構成。S3 は完全非公開にし、CloudFront の
+  Origin Access Control (OAC) だけが読めるようにする。HTTP は HTTPS へ
+  リダイレクトし、セキュリティヘッダを CloudFront 側で付与する。
+
+# 【重要】既存構成との違い
+#   旧: Route53 -> CloudFront -> S3 "静的ウェブサイトホスティング"(パブリック)
+#       S3 の website エンドポイントが公開されているため CloudFront を迂回でき、
+#       迂回分は CloudFront 無料枠で吸収されず S3 の課金対象になる。
+#       また website エンドポイントは HTTP 専用で HTTPS が使えない。
+#   新: Route53 -> CloudFront -(OAC)-> S3 REST エンドポイント(非公開)
+#
+# 費用: このテンプレートが作るものは全て無料枠の範囲。
+#   - S3: 数MB の保管と CloudFront 向けの転送のみ
+#   - CloudFront: 1TB/月・1000万リクエスト/月まで無料(無期限)
+#   - OAC / Response Headers Policy / Cache Policy: 課金なし
+#   - ACM 証明書: 無料
+#   - Route53 ホストゾーン: 月 $0.50（既存。このテンプレートでは作らない）
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: 公開するドメイン名 (例 etaolab.com)
+  BucketName:
+    Type: String
+    Description: 配信元の S3 バケット名。既存を使う場合はその名前を指定する
+  CertificateArn:
+    Type: String
+    Description: >
+      ACM 証明書の ARN。CloudFront が使う証明書は us-east-1 に無ければならない。
+      既存の証明書がある場合はその ARN をそのまま指定する。
+  IncludeWwwAlias:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      www.<DomainName> も配信対象に含めるか。含める場合は ACM 証明書側にも
+      www のドメインが入っている必要がある。
+
+Conditions:
+  UseWww: !Equals [!Ref IncludeWwwAlias, 'true']
+
+Resources:
+  # ---------------------------------------------------------------
+  # 配信元のバケット。パブリックアクセスは4項目すべて遮断する。
+  # ---------------------------------------------------------------
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    # 中身を消したくないので、スタックを消してもバケットは残す
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        # 誤って上書きしたときに戻せるようにする。数MBなので保管料はほぼゼロ。
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: 古いバージョンを30日で消す
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+          - Id: 未完了のマルチパートアップロードを7日で消す
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  # このディストリビューションからの GetObject だけを許可する。
+  # Principal を "*" にしないこと。それが旧構成の穴だった。
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt SiteBucket.Arn
+              - !Sub '${SiteBucket.Arn}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+
+  # ---------------------------------------------------------------
+  # OAC。CloudFront が SigV4 で署名して S3 を読む。
+  # ---------------------------------------------------------------
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-oac'
+        Description: !Sub '${DomainName} の配信元へのアクセス制御'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ---------------------------------------------------------------
+  # セキュリティヘッダ。旧構成では一つも付いていなかった。
+  # ---------------------------------------------------------------
+  ResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub '${AWS::StackName}-security-headers'
+        Comment: HSTS・MIME スニッフィング防止・CSP など
+        SecurityHeadersConfig:
+          StrictTransportSecurity:
+            # 1年。プリロードは一度登録すると取り消しが難しいので既定では入れない。
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+            Preload: false
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          XSSProtection:
+            # 現代のブラウザでは無効化が推奨。CSP で守る。
+            Protection: false
+            ModeBlock: false
+            Override: true
+          ContentSecurityPolicy:
+            Override: true
+            # 読み込み先を実際に使っているものだけに絞る:
+            #   - Google Fonts (CSS は fonts.googleapis.com、フォント本体は fonts.gstatic.com)
+            #   - お問い合わせフォームの送信先 docs.google.com
+            #     form-action と frame-src の両方が要る(非表示 iframe を target にしているため)
+            ContentSecurityPolicy: >-
+              default-src 'self';
+              script-src 'self';
+              style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+              font-src 'self' https://fonts.gstatic.com;
+              img-src 'self' data:;
+              connect-src 'self';
+              form-action https://docs.google.com;
+              frame-src https://docs.google.com;
+              frame-ancestors 'none';
+              base-uri 'self';
+              object-src 'none';
+              upgrade-insecure-requests
+        CustomHeadersConfig:
+          Items:
+            - Header: Permissions-Policy
+              Value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()'
+              Override: true
+        RemoveHeadersConfig:
+          Items:
+            # オリジンの種類を漏らさない
+            - Header: server
+
+  # ---------------------------------------------------------------
+  # 配信
+  # ---------------------------------------------------------------
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub '${DomainName} portfolio'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        # 日本を含む価格クラス。無料枠(1TB/月)は価格クラスに関係なく適用される。
+        PriceClass: PriceClass_200
+        Aliases: !If
+          - UseWww
+          - [!Ref DomainName, !Sub 'www.${DomainName}']
+          - [!Ref DomainName]
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: s3-origin
+            # website エンドポイントではなく REST エンドポイントを使う。
+            # これが OAC を効かせるための条件。
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: s3-origin
+          # ここが旧構成では "allow-all" になっていた
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # マネージドポリシー CachingOptimized
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
+        CustomErrorResponses:
+          # SPA のルーティング。/works/... を直接開いても index.html を返す。
+          # S3 は権限が無いオブジェクトに 403 を返すので 403 も拾う。
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+
+Outputs:
+  DistributionId:
+    Description: キャッシュ削除やデプロイで使う
+    Value: !Ref Distribution
+    Export:
+      Name: !Sub '${AWS::StackName}-DistributionId'
+  DistributionDomainName:
+    Description: Route 53 のエイリアス先。切り替え前の動作確認にも使う
+    Value: !GetAtt Distribution.DomainName
+  BucketNameOut:
+    Description: デプロイ先のバケット
+    Value: !Ref SiteBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
