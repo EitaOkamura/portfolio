@@ -1,0 +1,20 @@
+# Node
+node_modules/
+dist/
+coverage/
+.vite/
+
+# 秘密情報
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# ログ
+*.log
+
+# 作業中のメモ（固まったら docs/ へ昇格させる）
+workbench/*
+!workbench/README.md
