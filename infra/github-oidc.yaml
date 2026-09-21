@@ -88,16 +88,31 @@ Resources:
             Condition:
               StringEquals:
                 'token.actions.githubusercontent.com:aud': sts.amazonaws.com
+              StringLike:
                 # ここを緩めないこと。sub を絞らないと、他人のリポジトリからでも
                 # このロールを引き受けられてしまう。
                 #
-                # ワークフローが `environment:` を指定していると、GitHub が発行する
-                # トークンの sub は ref 形式ではなく environment 形式になる。
-                # 形式が合っていないと sts:AssumeRoleWithWebIdentity が拒否される。
+                # 形式が2つある:
+                #  1. repo:OWNER/REPO:...
+                #  2. repo:OWNER@<所有者ID>/REPO@<リポジトリID>:...
+                #
+                # GitHub は 2 の「不変ID入り」形式へ移行している（名前を再利用した
+                # 成りすましを防ぐため）。どちらが来るかは環境によるので両方許可する。
+                # リストは OR として評価される。
+                #
+                # ワイルドカードは ID の部分にしか効かない。GitHub のユーザ名と
+                # リポジトリ名に '@' と '/' は使えないため、他人のリポジトリが
+                # このパターンに一致することはない。
+                #
+                # また、ワークフローが `environment:` を指定していると sub は
+                # ref 形式ではなく environment 形式になる。形式が合っていないと
+                # sts:AssumeRoleWithWebIdentity が拒否される。
                 'token.actions.githubusercontent.com:sub': !If
                   - UseEnvironmentSubject
-                  - !Sub 'repo:${GitHubOwner}/${GitHubRepo}:environment:${GitHubEnvironment}'
-                  - !Sub 'repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+                  - - !Sub 'repo:${GitHubOwner}/${GitHubRepo}:environment:${GitHubEnvironment}'
+                    - !Sub 'repo:${GitHubOwner}@*/${GitHubRepo}@*:environment:${GitHubEnvironment}'
+                  - - !Sub 'repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+                    - !Sub 'repo:${GitHubOwner}@*/${GitHubRepo}@*:ref:refs/heads/${GitHubBranch}'
       Policies:
         - PolicyName: deploy-site
           PolicyDocument:
