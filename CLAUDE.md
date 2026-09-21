@@ -51,6 +51,13 @@ make infra    # CloudFormation テンプレートの構文確認だけ
 - **CloudFront の全消し (`--paths "/*"`) をしない。** 無効化は 1000 パス/月まで無料。
   ファイル名にハッシュが付かないものだけ指定すれば足りる
 - 構成を変えたら `./scripts/verify-deploy.sh` を流す。**結果を見ずに完了と言わない**
+- **IAM の Description に日本語を書かない。** ASCII と Latin-1 しか通らず
+  スタックが CREATE_FAILED になる。CloudFront は日本語を受け付けるので、
+  サービスごとに制約が違う
+- **OIDC の信頼ポリシーを触るときは sub の実物を確認する。** `environment:` の
+  有無で形式が変わり、GitHub は不変 ID 入りの形式へ移行中。エラーに sub は
+  出ないので CloudTrail の `AssumeRoleWithWebIdentity` イベントで確認する。
+  詳細は [docs/aws-migration.md](docs/aws-migration.md) の 11 節
 
 ## 状態（2026-09-21 時点）
 
@@ -60,8 +67,9 @@ make infra    # CloudFormation テンプレートの構文確認だけ
   適用した内容は [docs/aws-migration.md](docs/aws-migration.md) の 10 節
 - 本番配信: 完了。https://etaolab.com/ は React 版が出ている
 - 操作は IAM ユーザー `etaolab-admin`（MFA 強制）で行う。**ルートは使わない**
-- **GitHub Actions: 未稼働。** ワークフローは書いてあるが、
-  リポジトリが GitHub に無く、OIDC ロールとリポジトリ変数も未設定
+- **GitHub Actions: 稼働中。** main への push でデプロイされ、
+  公開状態の検証まで通ることを確認済み。
+  リポジトリは https://github.com/EitaOkamura/portfolio （Public）
 
 ## 主要な識別子
 

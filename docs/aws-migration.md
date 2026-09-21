@@ -482,3 +482,74 @@ echo
 - **未割り当ての仮想 MFA デバイス `Authapp`** がアカウントに残っている。
   どのユーザーにも紐づいていない。心当たりが無ければ消してよい
 - `www.etaolab.com` は未設定のまま
+
+---
+
+## 11. GitHub Actions の設定（2026-09-21）
+
+リポジトリ: https://github.com/EitaOkamura/portfolio （Public）
+
+| 種別 | 値 |
+|---|---|
+| OIDC プロバイダ | `token.actions.githubusercontent.com` |
+| デプロイ用ロール | `portfolio-github-deploy` |
+| スタック | `etaolab-github-oidc` |
+| GitHub 環境 | `production`（`main` ブランチのみ許可） |
+
+リポジトリ変数（秘密ではないので Variables）:
+`AWS_ROLE_ARN` / `AWS_REGION` / `S3_BUCKET` / `CLOUDFRONT_DIST_ID`
+
+### つまずいた点
+
+**1. IAM の Description に日本語が使えない**
+
+ASCII と Latin-1 の範囲しか受け付けず、日本語を入れるとスタックが
+CREATE_FAILED になる。CloudFormation の Parameters や Outputs の
+Description は CloudFormation 側の値なので日本語で構わない。
+IAM API に渡るリソースの Description だけが対象。
+
+CloudFront は日本語を受け付ける（Response Headers Policy の
+Comment に日本語を入れたものが通っている）。**サービスごとに制約が違う。**
+
+**2. `environment:` を指定すると OIDC の sub 形式が変わる**
+
+ワークフローが `environment: production` を持つと、sub は
+
+```
+repo:OWNER/REPO:environment:production
+```
+
+になり、`ref:refs/heads/main` 形式にはならない。信頼ポリシーが
+ブランチ形式を期待していると `sts:AssumeRoleWithWebIdentity` が拒否される。
+
+environment 形式の sub にはブランチ名が入らないため、
+**信頼ポリシーだけでは「main からのみ」を強制できない。**
+GitHub 側の環境にデプロイブランチポリシーを設定して補うこと。
+片方だけでは不十分。
+
+**3. GitHub は sub に不変 ID を含める形式へ移行している**
+
+実際に送られてきた sub は
+
+```
+repo:EitaOkamura@144904969/portfolio@1379099788:environment:production
+```
+
+だった。所有者 ID とリポジトリ ID が入る。リポジトリ名を再利用した
+成りすましを防ぐためのもの。`StringLike` で両方の形式を許可してある。
+
+ワイルドカードが効くのは ID の部分だけで、GitHub のユーザ名と
+リポジトリ名には `@` も `/` も使えないため、他人のリポジトリが
+このパターンに一致することはない。
+
+**診断のしかた**: エラーメッセージ（`Not authorized to perform
+sts:AssumeRoleWithWebIdentity`）には sub が出ない。CloudTrail の
+`AssumeRoleWithWebIdentity` イベントを引くと `userIdentity.userName` に
+実際の sub が入っているので、そこで突き合わせる。
+
+```bash
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity \
+  --max-results 1 --query 'Events[0].CloudTrailEvent' --output text \
+  | python3 -m json.tool
+```
