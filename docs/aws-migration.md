@@ -422,3 +422,63 @@ echo
   取り消しに時間がかかるため、運用が安定してから判断する。
 - **アクセスログは取っていない。** CloudFront の標準ログは S3 への保管料がかかる。
   必要になってからで遅くない。
+
+---
+
+## 10. 適用の記録（2026-09-21）
+
+方法1（既存構成を直す）で適用済み。実際に作成・変更したもの:
+
+| 種別 | 識別子 | 内容 |
+|---|---|---|
+| OAC | `E5S251M5I6TYV` | `etaolab-oac` |
+| Response Headers Policy | `2469581e-5989-4832-b1de-afc4be27cbe0` | `etaolab-security-headers` |
+| ディストリビューション | `E3OYIZGQS2R1BB` | オリジン差し替え・HTTPS強制・ヘッダ付与・403/404 フォールバック |
+| ACM 証明書 | `af5610b1-78ee-4e74-a36a-7cafdf10779d` | 既存を流用（us-east-1） |
+| IAM ユーザー | `etaolab-admin` | スタック `etaolab-iam-user` |
+
+### 調査で判明した追加の問題
+
+外形調査では分からなかったが、設定を読んで初めて分かったもの:
+
+- **オリジンへの接続が `http-only` だった。** CloudFront のエッジと S3 の間が
+  インターネット上を平文で流れていた。OAC 化で解消
+- `PriceClass` が `PriceClass_All` だった。日本向けなら `PriceClass_200` で足りる
+- `HttpVersion` が `http2` だった。`http2and3` に変更
+
+### 変更前後
+
+| 項目 | 変更前 | 変更後 |
+|---|---|---|
+| オリジン | `etaolab.com.s3-website-ap-northeast-1.amazonaws.com` | `etaolab.com.s3.ap-northeast-1.amazonaws.com` |
+| オリジンへの接続 | `http-only`（平文） | OAC / SigV4 |
+| Viewer Protocol | `allow-all` | `redirect-to-https` |
+| Response Headers | なし | セキュリティヘッダ一式 |
+| カスタムエラー応答 | なし | 403/404 → `/index.html` (200) |
+| バケットポリシー | `Principal: "*"` | CloudFront のサービスプリンシパル限定 |
+| 静的ウェブサイトホスティング | 有効 | 無効 |
+| ブロックパブリックアクセス | 4項目すべて無効 | 4項目すべて有効 |
+| バケットの中身 | 52 オブジェクト / 48.6 MiB | 43 オブジェクト / 4.7 MiB |
+
+`./scripts/verify-deploy.sh` は全項目通過。
+
+### バックアップ
+
+`workbench/legacy-site-full-backup/` に移行前のバケットの完全なコピー
+（52 ファイル / 50MB）がある。`workbench/aws-rollback/` に変更前の
+ディストリビューション設定・バケットポリシー・ホスティング設定・
+パブリックアクセスブロック設定の JSON がある。
+
+部分バックアップ（Web から辿って集めたもの）には
+`images/etaIcon.png` と `images/poriteku/network5.jpg` が
+含まれていなかった。どのページからも参照されていないファイルは
+バケットを直接読まないと取得できない、という想定どおりの結果になった。
+
+### 残っている片付け
+
+- **無効化済みのディストリビューション `E22BC8S0SXXCEO`** が残っている。
+  エイリアスなし、`Enabled: false`、オリジンは S3 の REST エンドポイント。
+  過去に同じ移行を試みて中断した跡に見える。無効なので課金は無いが、消してよい
+- **未割り当ての仮想 MFA デバイス `Authapp`** がアカウントに残っている。
+  どのユーザーにも紐づいていない。心当たりが無ければ消してよい
+- `www.etaolab.com` は未設定のまま

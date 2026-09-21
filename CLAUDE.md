@@ -56,10 +56,22 @@ make infra    # CloudFormation テンプレートの構文確認だけ
 
 - React への移植とデザイン刷新: 完了。`make check` は通っている
 - 画像の最適化: 完了（47.4MB → 4.4MB）
-- **AWS の公開設定の修正: 未適用。** 手順は [docs/aws-migration.md](docs/aws-migration.md)。
-  適用前なので `./scripts/verify-deploy.sh` は落ちる
-- GitHub Actions: ワークフローは書いてあるが、
-  OIDC ロールと リポジトリ変数が未設定のため未稼働
+- **AWS の公開設定の修正: 適用済み。** `./scripts/verify-deploy.sh` は全項目通過。
+  適用した内容は [docs/aws-migration.md](docs/aws-migration.md) の 10 節
+- 本番配信: 完了。https://etaolab.com/ は React 版が出ている
+- 操作は IAM ユーザー `etaolab-admin`（MFA 強制）で行う。**ルートは使わない**
+- **GitHub Actions: 未稼働。** ワークフローは書いてあるが、
+  リポジトリが GitHub に無く、OIDC ロールとリポジトリ変数も未設定
+
+## 主要な識別子
+
+| 種別 | 値 |
+|---|---|
+| S3 バケット | `etaolab.com` (ap-northeast-1) |
+| CloudFront | `E3OYIZGQS2R1BB` |
+| OAC | `E5S251M5I6TYV` |
+| Response Headers Policy | `2469581e-5989-4832-b1de-afc4be27cbe0` |
+| AWS プロファイル | `etaolab`（`aws login` で更新。アクセスキーは無い） |
 
 <!-- BEGIN AWS Agent Toolkit rules -->
 

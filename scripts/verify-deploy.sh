@@ -45,7 +45,13 @@ headers=$(curl -sSI --max-time 10 "https://${DOMAIN}/" 2>/dev/null || echo '')
 for name in strict-transport-security x-content-type-options content-security-policy referrer-policy permissions-policy; do
   echo "$headers" | grep -qi "^${name}:" && ok "$name" || ng "$name が無い"
 done
-echo "$headers" | grep -qi '^server:' && warn "server ヘッダが残っている（オリジン種別が露出する）" || ok "server ヘッダなし"
+# CloudFront は自身の server ヘッダを付ける。問題なのはオリジンの種別
+# (AmazonS3 など) が漏れること。CloudFront 表記なら露出していない。
+if echo "$headers" | grep -qiE '^server:[[:space:]]*(AmazonS3|Apache|nginx)'; then
+  ng "server ヘッダにオリジンの種別が出ている"
+else
+  ok "server ヘッダからオリジン種別が漏れていない"
+fi
 
 echo "== CloudFront を経由しているか =="
 echo "$headers" | grep -qi 'cloudfront' && ok "CloudFront 経由" || ng "CloudFront を通っていない"
