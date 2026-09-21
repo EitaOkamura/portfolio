@@ -750,3 +750,13 @@ a.work:hover .work__no { color: var(--accent); }
   .section { padding: 64px 0; }
   :root { --gutter: 16px; }
 }
+
+/* 罠のフィールド。display:none だと埋めない自動送信があるので、
+   描画はさせたまま画面外に飛ばす。 */
+.honeypot {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}

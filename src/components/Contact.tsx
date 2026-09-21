@@ -1,31 +1,48 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { SectionHead } from './SectionHead'
-import { contactForm } from '../content/profile'
+import { contactEndpoint } from '../content/profile'
 
-type Status = 'idle' | 'sent' | 'invalid'
+type Status =
+  | { kind: 'idle' }
+  | { kind: 'sending' }
+  | { kind: 'sent' }
+  | { kind: 'error'; message: string }
 
-/** Google フォームへ POST する。CORS が許可されていないため fetch は使えず、
- *  旧サイトと同じく非表示の iframe を target にして送信する。
- *  この方式では送信結果を読み取れないので、成功の断定はしない文言にしてある。 */
 export function Contact() {
-  const [status, setStatus] = useState<Status>('idle')
-  const formRef = useRef<HTMLFormElement>(null)
+  const [status, setStatus] = useState<Status>({ kind: 'idle' })
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
     const form = e.currentTarget
     const data = new FormData(form)
-    const name = String(data.get(contactForm.fields.name) ?? '').trim()
-    const email = String(data.get(contactForm.fields.email) ?? '').trim()
 
-    if (!name || !email) {
-      e.preventDefault()
-      setStatus('invalid')
-      return
+    setStatus({ kind: 'sending' })
+    try {
+      const res = await fetch(contactEndpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: data.get('name'),
+          email: data.get('email'),
+          message: data.get('message'),
+          // 罠のフィールド。自動送信だけが埋める。
+          website: data.get('website'),
+        }),
+      })
+      // 旧方式と違い、ここで実際の結果が分かる。
+      const body: { ok?: boolean; error?: string } = await res.json().catch(() => ({}))
+      if (!res.ok || !body.ok) {
+        setStatus({ kind: 'error', message: body.error ?? '送信に失敗しました' })
+        return
+      }
+      setStatus({ kind: 'sent' })
+      form.reset()
+    } catch {
+      setStatus({ kind: 'error', message: 'ネットワークに接続できませんでした' })
     }
-    // 送信自体は iframe 側で進む。ここでは画面の状態だけ更新する。
-    setStatus('sent')
-    setTimeout(() => formRef.current?.reset(), 0)
   }
+
+  const sending = status.kind === 'sending'
 
   return (
     <section className="section" id="contact">
@@ -33,27 +50,21 @@ export function Contact() {
         <SectionHead
           tag="07 — Contact"
           title="Contact"
-          lead="下記フォームに必要事項を入力して送信してください。Google フォーム宛に届きます。"
+          lead="下記フォームに必要事項を入力して送信してください。返信は入力いただいたメールアドレス宛に差し上げます。"
         />
 
-        <form
-          ref={formRef}
-          className="form"
-          method="post"
-          action={contactForm.action}
-          target="contact_sink"
-          onSubmit={handleSubmit}
-        >
+        <form className="form" onSubmit={handleSubmit}>
           <div className="field">
             <label htmlFor="cf-name">
               お名前<span className="req">必須</span>
             </label>
             <input
               id="cf-name"
-              name={contactForm.fields.name}
+              name="name"
               type="text"
               autoComplete="name"
               placeholder="株式会社 〇〇"
+              maxLength={100}
               required
             />
           </div>
@@ -64,10 +75,11 @@ export function Contact() {
             </label>
             <input
               id="cf-email"
-              name={contactForm.fields.email}
+              name="email"
               type="email"
               autoComplete="email"
               placeholder="sample@example.com"
+              maxLength={254}
               required
             />
           </div>
@@ -76,32 +88,36 @@ export function Contact() {
             <label htmlFor="cf-message">お問い合わせ内容</label>
             <textarea
               id="cf-message"
-              name={contactForm.fields.message}
+              name="message"
               rows={6}
+              maxLength={4000}
               placeholder="お問い合わせ内容"
             />
           </div>
 
-          {status === 'sent' ? (
+          {/* 罠。人間には見えず、読み上げもされず、Tab でも止まらない。 */}
+          <div className="honeypot" aria-hidden="true">
+            <label htmlFor="cf-website">この欄は入力しないでください</label>
+            <input id="cf-website" name="website" type="text" tabIndex={-1} autoComplete="off" />
+          </div>
+
+          {status.kind === 'sent' ? (
             <p className="form__status" role="status">
               送信しました。内容を確認のうえ返信いたします。
             </p>
           ) : null}
-          {status === 'invalid' ? (
+          {status.kind === 'error' ? (
             <p className="form__status form__error" role="alert">
-              お名前とメールアドレスを入力してください。
+              {status.message}
             </p>
           ) : null}
 
           <div>
-            <button type="submit" className="btn btn--primary">
-              送信する
+            <button type="submit" className="btn btn--primary" disabled={sending}>
+              {sending ? '送信中…' : '送信する'}
             </button>
           </div>
         </form>
-
-        {/* 送信先。ページ遷移させないために置いている */}
-        <iframe name="contact_sink" title="送信先" style={{ display: 'none' }} />
 
         <p className="prose" style={{ marginTop: '40px' }}>
           最後までご覧いただきありがとうございます。このサイトや私について何かありましたら、

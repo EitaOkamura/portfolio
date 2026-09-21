@@ -5,6 +5,16 @@
     "suspicious": "warn",
     "perf": "warn"
   },
-  "plugins": ["react", "typescript", "unicorn"],
-  "ignorePatterns": ["dist", "node_modules"]
+  "plugins": [
+    "react",
+    "typescript",
+    "unicorn"
+  ],
+  "ignorePatterns": [
+    "dist",
+    "node_modules"
+  ],
+  "rules": {
+    "react/react-in-jsx-scope": "off"
+  }
 }

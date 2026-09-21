@@ -60,6 +60,10 @@ function useScrollReset() {
     const id = hash.slice(1)
     const target = document.getElementById(id)
     if (target) target.scrollIntoView({ behavior: 'auto', block: 'start' })
+    // pathname は本体で使っていないが、依存配列から外せない。
+    // ハッシュ無しのページ間を移動したとき hash は '' のまま変わらないので、
+    // pathname が無いと効果が再実行されずスクロール位置が戻らない。
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [pathname, hash])
 }
 

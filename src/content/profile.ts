@@ -72,13 +72,12 @@ export const closing = {
   ],
 }
 
-/** 元サイトと同じ Google フォームへ POST する。サーバを持たないため無料で維持できる。 */
-export const contactForm = {
-  action:
-    'https://docs.google.com/forms/u/0/d/e/1FAIpQLSdB3VMRf0HZMc1ParCq4xM4bTYFsK9fPKi_YOGNMKLQpoY3xA/formResponse',
-  fields: {
-    name: 'entry.2005620554',
-    email: 'entry.1045781291',
-    message: 'entry.839337160',
-  },
-}
+/** 問い合わせの送信先。CloudFront の /api/* が API Gateway を経て Lambda に届き、
+ *  SES でメールを送る。構成は infra/contact.yaml にある。
+ *
+ *  同一オリジンなので CORS は不要で、CSP も connect-src 'self' のままでよい。
+ *
+ *  元は Google フォームへ非表示 iframe 経由で POST していたが、
+ *  クロスオリジンのため送信結果を読み取れず、失敗しても画面上は成功に見えた。
+ *  実際に届かない事象が起きたため、HTTP 応答が返る方式に変えた。 */
+export const contactEndpoint = '/api/contact'

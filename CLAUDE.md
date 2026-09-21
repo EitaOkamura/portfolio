@@ -83,7 +83,7 @@ make infra    # CloudFormation テンプレートの構文確認だけ
 
 <!-- BEGIN AWS Agent Toolkit rules -->
 
-# AWS Guidance
+## AWS Guidance
 
 - Where these AWS rules conflict with the project's own instructions, the
   project's instructions take precedence.
@@ -103,7 +103,7 @@ make infra    # CloudFormation テンプレートの構文確認だけ
 - Do not use em dashes in AWS resource names or descriptions. Use
   hyphens instead.
 
-## Secret Safety
+### Secret Safety
 
 - MUST load the `aws-secrets-manager` skill first for any secret,
   credential, API key, token, or password task. MUST NOT call

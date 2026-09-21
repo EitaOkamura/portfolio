@@ -1,0 +1,310 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  問い合わせフォームの受け口。Lambda Function URL で受けて SES でメールを送る。
+
+# なぜ作り直したか
+#   元は Google フォームへ非表示 iframe 経由で POST していた。クロスオリジンの
+#   ため送信結果を読み取れず、失敗しても画面上は成功に見える。実際に届かない
+#   事象が起きたが、フォーム側の問題なのか送信自体が失敗したのか切り分けられなかった。
+#   HTTP 応答が返る方式にすれば、成功失敗を画面に正確に出せる。
+#
+# 費用
+#   Lambda: 月100万リクエストまで無料（無期限）。Function URL に追加料金は無い
+#   SES: 1,000通あたり $0.10。サンドボックスのまま運用するので1日200通が上限で、
+#        濫用されても1日あたり $0.02 で頭打ちになる
+#   CloudWatch Logs: 保持期間を14日に切って増え続けないようにしてある
+#
+# サンドボックスを解除しない
+#   送り先は自分のアドレスだけなので解除の必要が無く、解除しないほうが
+#   濫用時の上限として働く。
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: etaolab.com
+    Description: 送信元に使うドメイン。DKIM の CNAME をこのゾーンに作る
+  HostedZoneId:
+    Type: String
+    Description: DomainName の Route 53 ホストゾーン ID（稼働中のほう）
+  FromAddress:
+    Type: String
+    Default: noreply@etaolab.com
+    Description: 差出人。DomainName 配下にすること
+  RecipientEmail:
+    Type: String
+    Description: >
+      問い合わせの届け先。サンドボックスでは宛先も検証が必要なため、
+      このアドレス宛に確認メールが飛ぶ。リンクを押して確認を完了すること。
+  AllowedOrigin:
+    Type: String
+    Default: https://etaolab.com
+    Description: このオリジンからの送信だけを受け付ける
+
+  DistributionId:
+    Type: String
+    Description: >
+      この Lambda を呼ぶ CloudFront ディストリビューションの ID。
+      Function URL は AWS_IAM にしてあり、ここで指定した
+      ディストリビューションからの署名付きリクエストだけを通す。
+
+Resources:
+  # ---------------------------------------------------------------
+  # 送信元ドメイン。Easy DKIM で署名し、迷惑メール判定されにくくする。
+  # ---------------------------------------------------------------
+  DomainIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref DomainName
+      DkimAttributes:
+        SigningEnabled: true
+
+  # DKIM の公開鍵を DNS に置く。3本とも必要。
+  DkimRecord1:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt DomainIdentity.DkimDNSTokenName1
+      Type: CNAME
+      TTL: '1800'
+      ResourceRecords: [!GetAtt DomainIdentity.DkimDNSTokenValue1]
+
+  DkimRecord2:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt DomainIdentity.DkimDNSTokenName2
+      Type: CNAME
+      TTL: '1800'
+      ResourceRecords: [!GetAtt DomainIdentity.DkimDNSTokenValue2]
+
+  DkimRecord3:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !GetAtt DomainIdentity.DkimDNSTokenName3
+      Type: CNAME
+      TTL: '1800'
+      ResourceRecords: [!GetAtt DomainIdentity.DkimDNSTokenValue3]
+
+  # サンドボックスでは宛先も検証済みである必要がある。
+  # 作成すると確認メールが飛ぶので、本人がリンクを押す。
+  RecipientIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref RecipientEmail
+
+  # ---------------------------------------------------------------
+  # 実行ロール。送れる相手を届け先だけに絞る。
+  # ---------------------------------------------------------------
+  ContactFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: send-contact-mail
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ses:SendEmail
+                Resource: !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${DomainName}'
+                Condition:
+                  StringEquals:
+                    # 乗っ取られても、この宛先以外には送れない
+                    'ses:Recipients': !Ref RecipientEmail
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub '${ContactLogGroup.Arn}:*'
+
+  # 保持期間を切らないとログが増え続ける。
+  ContactLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::StackName}-contact'
+      RetentionInDays: 14
+
+  ContactFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ContactLogGroup
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-contact'
+      Description: Contact form handler for the portfolio site
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt ContactFunctionRole.Arn
+      Timeout: 10
+      MemorySize: 256
+      # ReservedConcurrentExecutions は指定しない。
+      # このアカウントの同時実行上限が 10 で、予約すると未予約分が
+      # 必要最低値の 10 を割り込んでエラーになる。
+      # 上限 10 自体が濫用時の歯止めとして働くので、予約しなくても足りる。
+      Environment:
+        Variables:
+          FROM_ADDRESS: !Ref FromAddress
+          TO_ADDRESS: !Ref RecipientEmail
+          ALLOWED_ORIGIN: !Ref AllowedOrigin
+      Code:
+        # ここが実体。4096 文字までインラインで置ける。
+        # **CommonJS で書くこと。** インラインの ZipFile は index.js として
+        # 保存されるため、import / export を使うと実行時に
+        # 「Cannot use import statement outside a module」で落ちる。
+        # scripts/validate-infra.mjs が .js として構文を確認する。
+        ZipFile: |
+          const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2')
+
+          const ses = new SESv2Client({})
+          const { FROM_ADDRESS, TO_ADDRESS, ALLOWED_ORIGIN } = process.env
+          const LIMITS = { name: 100, email: 254, message: 4000 }
+
+          const reply = (status, body, origin) => ({
+            statusCode: status,
+            headers: {
+              'content-type': 'application/json; charset=utf-8',
+              ...(origin === ALLOWED_ORIGIN
+                ? {
+                    'access-control-allow-origin': origin,
+                    'access-control-allow-methods': 'POST, OPTIONS',
+                    'access-control-allow-headers': 'content-type',
+                    'access-control-max-age': '86400',
+                  }
+                : {}),
+            },
+            body: JSON.stringify(body),
+          })
+
+          exports.handler = async (event) => {
+            const origin = event.headers?.origin ?? ''
+            const method = event.requestContext?.http?.method
+
+            if (method === 'OPTIONS') return reply(204, {}, origin)
+            if (method !== 'POST') return reply(405, { error: 'method not allowed' }, origin)
+            if (origin !== ALLOWED_ORIGIN) return reply(403, { error: 'forbidden' }, origin)
+
+            let data
+            try {
+              data = JSON.parse(event.body ?? '{}')
+            } catch {
+              return reply(400, { error: '内容を読み取れませんでした' }, origin)
+            }
+
+            if (data.website) return reply(200, { ok: true }, origin)
+
+            const name = String(data.name ?? '').trim()
+            const email = String(data.email ?? '').trim()
+            const message = String(data.message ?? '').trim()
+
+            if (!name || !email) {
+              return reply(400, { error: 'お名前とメールアドレスを入力してください' }, origin)
+            }
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+              return reply(400, { error: 'メールアドレスの形式が正しくありません' }, origin)
+            }
+            if (name.length > LIMITS.name || email.length > LIMITS.email || message.length > LIMITS.message) {
+              return reply(400, { error: '入力が長すぎます' }, origin)
+            }
+
+            const body = [
+              `お名前: ${name}`,
+              `メール: ${email}`,
+              '',
+              message || '(本文なし)',
+              '',
+              '---',
+              `送信元IP: ${event.requestContext?.http?.sourceIp ?? '不明'}`,
+              `日時: ${new Date().toISOString()}`,
+            ].join('\n')
+
+            try {
+              await ses.send(
+                new SendEmailCommand({
+                  FromEmailAddress: FROM_ADDRESS,
+                  Destination: { ToAddresses: [TO_ADDRESS] },
+                  ReplyToAddresses: [email],
+                  Content: {
+                    Simple: {
+                      Subject: { Data: `[etaolab.com] ${name} さんから問い合わせ`, Charset: 'UTF-8' },
+                      Body: { Text: { Data: body, Charset: 'UTF-8' } },
+                    },
+                  },
+                }),
+              )
+              return reply(200, { ok: true }, origin)
+            } catch (err) {
+              console.error('SES 送信に失敗', err)
+              return reply(502, { error: '送信に失敗しました。時間をおいて再度お試しください' }, origin)
+            }
+          }
+
+  # ---------------------------------------------------------------
+  # HTTP API。Lambda Function URL + OAC は使わない。
+  #
+  #  1) このアカウントではパブリックな Function URL が遮断されており、
+  #     リソースポリシーを正しく付けても 403 で Lambda に到達しない
+  #  2) CloudFront の OAC で Function URL を呼ぶ構成は、OAC がリクエスト
+  #     ボディを署名に含めないため POST が「signature does not match」で
+  #     落ちる。x-amz-content-sha256 に UNSIGNED-PAYLOAD を入れても解決しない
+  #
+  # HTTP API なら署名の問題が無く、CloudFront の背後に置けば
+  # ブラウザから見て同一オリジンになるので CORS も要らない。
+  #
+  # 費用: 100万リクエストあたり $1.00。問い合わせフォームの量では実質ゼロ。
+  # ---------------------------------------------------------------
+  ContactApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${AWS::StackName}-api'
+      Description: Contact form endpoint for the portfolio site
+      ProtocolType: HTTP
+      # CORS は設定しない。CloudFront 経由で同一オリジンになるため。
+
+  ContactApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref ContactApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ContactFunction.Arn
+      # 2.0 だと event の形が Function URL と同じになり、
+      # ハンドラ側を書き換えずに済む。
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 10000
+
+  ContactApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref ContactApi
+      # CloudFront が /api/contact をそのまま渡すので、経路も合わせる。
+      RouteKey: 'POST /api/contact'
+      Target: !Sub 'integrations/${ContactApiIntegration}'
+
+  ContactApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref ContactApi
+      StageName: $default
+      AutoDeploy: true
+
+  ContactApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ContactFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ContactApi}/*/POST/api/contact'
+
+Outputs:
+  ContactApiId:
+    Description: HTTP API の ID
+    Value: !Ref ContactApi
+  ContactOriginDomain:
+    Description: CloudFront のオリジンに設定するホスト名
+    Value: !Sub '${ContactApi}.execute-api.${AWS::Region}.amazonaws.com'
+  ContactPath:
+    Description: フロントエンドから POST する先（CloudFront 経由の同一オリジン）
+    Value: /api/contact

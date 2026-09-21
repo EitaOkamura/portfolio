@@ -32,9 +32,10 @@ export function hostname(url: string): string {
   }
 }
 
-/** 評価の高い順に並べる。同点なら元の並び順を保つ（安定ソート）。 */
+/** 評価の高い順に並べる。同点なら元の並び順を保つ（安定ソート）。
+ *  toSorted は元の配列を変更しないので、コピーを作る必要がない。 */
 export function byRatingDesc(skills: readonly Skill[]): Skill[] {
-  return [...skills].sort((a, b) => b.rating - a.rating)
+  return skills.toSorted((a, b) => b.rating - a.rating)
 }
 
 /** 一覧の見出しに出す「n 件」。0 件のときに「0 件」と出したいのでそのまま返す。 */

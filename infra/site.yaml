@@ -152,10 +152,12 @@ Resources:
             Override: true
           ContentSecurityPolicy:
             Override: true
-            # 読み込み先を実際に使っているものだけに絞る:
-            #   - Google Fonts (CSS は fonts.googleapis.com、フォント本体は fonts.gstatic.com)
-            #   - お問い合わせフォームの送信先 docs.google.com
-            #     form-action と frame-src の両方が要る(非表示 iframe を target にしているため)
+            # 読み込み先を実際に使っているものだけに絞る。
+            # 外部は Google Fonts だけ (CSS は fonts.googleapis.com、
+            # フォント本体は fonts.gstatic.com)。
+            # 問い合わせ API は CloudFront の /api/* 配下にあり同一オリジンなので、
+            # connect-src は 'self' のままでよい。
+            # HTML の form 送信も iframe も使っていないので 'none' で閉じる。
             ContentSecurityPolicy: >-
               default-src 'self';
               script-src 'self';
@@ -163,8 +165,8 @@ Resources:
               font-src 'self' https://fonts.gstatic.com;
               img-src 'self' data:;
               connect-src 'self';
-              form-action https://docs.google.com;
-              frame-src https://docs.google.com;
+              form-action 'none';
+              frame-src 'none';
               frame-ancestors 'none';
               base-uri 'self';
               object-src 'none';
