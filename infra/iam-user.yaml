@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  日常操作用の IAM ユーザー。ルートユーザーでの作業をやめるために作る。
+
+# なぜ作るか
+#   これまでこのアカウントには IAM ユーザーが1人もおらず、ルートでの操作しか
+#   できなかった。ルートは権限が無制限で、操作ミスに対する歯止めが無い。
+#
+# アクセスキーは作らない
+#   このユーザーにコンソールアクセスを与え、コンソールにサインインしてから
+#   `aws login` を実行する。するとこのユーザーの権限に絞られた一時認証情報が
+#   得られる。長期のアクセスキー(AKIA...)をディスクに置かずに済む。
+#
+#   コンソールのパスワードはこのテンプレートでは設定しない。
+#   パスワードをテンプレートやパラメータに通したくないため、
+#   作成後にコンソールから本人が設定する。
+#
+# 費用: IAM に課金は無い。
+
+Parameters:
+  UserName:
+    Type: String
+    Default: etaolab-admin
+    AllowedPattern: '[\w+=,.@-]+'
+    Description: 作成する IAM ユーザー名
+
+  EnforceMfa:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      true にすると、MFA 無しのセッションでは MFA の登録操作以外を拒否する。
+      **MFA を登録してから true にすること。** 順序を誤ると何もできなくなる。
+
+Conditions:
+  ShouldEnforceMfa: !Equals [!Ref EnforceMfa, 'true']
+
+Resources:
+  # 権限はグループに付ける。ユーザーが増えたときに付け替えずに済む。
+  AdminGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: !Sub '${UserName}-group'
+      ManagedPolicyArns:
+        # 今回の移行は OIDC プロバイダやデプロイ用ロールなど IAM リソースも作る。
+        # 人間側は管理者権限 + MFA で守り、絞り込みは CI 用の OIDC ロール側
+        # (infra/github-oidc.yaml) で行う、という分担にしている。
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess'
+
+  AdminUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref UserName
+      Groups:
+        - !Ref AdminGroup
+      # LoginProfile は意図的に書いていない。
+      # パスワードはコンソールで本人が設定する。
+
+  # MFA を登録してから EnforceMfa=true で適用する。
+  # 登録操作そのものは MFA 無しでも通るようにしてあり、
+  # これが無いと MFA を登録できずに詰む。
+  MfaEnforcementPolicy:
+    Type: AWS::IAM::Policy
+    Condition: ShouldEnforceMfa
+    Properties:
+      PolicyName: require-mfa
+      Groups:
+        - !Ref AdminGroup
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowViewAccountInfo
+            Effect: Allow
+            Action:
+              - iam:GetAccountPasswordPolicy
+              - iam:ListVirtualMFADevices
+            Resource: '*'
+
+          - Sid: AllowManageOwnPassword
+            Effect: Allow
+            Action:
+              - iam:ChangePassword
+              - iam:GetUser
+            Resource: 'arn:aws:iam::*:user/${aws:username}'
+
+          - Sid: AllowCreateOwnVirtualMfaDevice
+            Effect: Allow
+            Action:
+              - iam:CreateVirtualMFADevice
+            Resource: 'arn:aws:iam::*:mfa/*'
+
+          - Sid: AllowManageOwnMfaDevice
+            Effect: Allow
+            Action:
+              - iam:DeactivateMFADevice
+              - iam:EnableMFADevice
+              - iam:ListMFADevices
+              - iam:ResyncMFADevice
+            Resource: 'arn:aws:iam::*:user/${aws:username}'
+
+          # NotAction なので、上に挙げた「MFA を登録するために必要な操作」以外を
+          # MFA 無しのときに拒否する。
+          - Sid: DenyEverythingElseWithoutMfa
+            Effect: Deny
+            NotAction:
+              - iam:CreateVirtualMFADevice
+              - iam:EnableMFADevice
+              - iam:GetUser
+              - iam:ListMFADevices
+              - iam:ListVirtualMFADevices
+              - iam:ResyncMFADevice
+              - iam:DeactivateMFADevice
+              - iam:ChangePassword
+              - iam:GetAccountPasswordPolicy
+              - sts:GetSessionToken
+            Resource: '*'
+            Condition:
+              BoolIfExists:
+                'aws:MultiFactorAuthPresent': 'false'
+
+Outputs:
+  UserNameOut:
+    Description: 作成された IAM ユーザー名
+    Value: !Ref AdminUser
+  UserArn:
+    Description: ユーザーの ARN
+    Value: !GetAtt AdminUser.Arn
+  ConsoleSignInUrl:
+    Description: このユーザーでサインインするための URL
+    Value: !Sub 'https://${AWS::AccountId}.signin.aws.amazon.com/console'
+  NextSteps:
+    Description: 作成後にやること
+    Value: >-
+      1) コンソールでこのユーザーにパスワードを設定する
+      2) MFA を登録する
+      3) このユーザーでコンソールにサインインし直す
+      4) aws login --profile etaolab を実行する
+      5) EnforceMfa=true でスタックを更新する
