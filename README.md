@@ -61,6 +61,14 @@ docs/
 迂回されたアクセスは CloudFront の無料枠で吸収されず S3 の課金対象になる。
 経緯と直し方は [docs/aws-migration.md](docs/aws-migration.md) にまとめてある。
 
+## お問い合わせ
+
+`/api/contact` への POST を CloudFront が API Gateway へ流し、Lambda が SES で
+メールを送る。同一オリジンなので CORS は要らず、CSP も `connect-src 'self'` のまま。
+
+構成は [infra/contact.yaml](infra/contact.yaml)、経緯は
+[docs/aws-migration.md](docs/aws-migration.md) の 12 節。
+
 ## 画像
 
 元サイトの画像は合計 47MB（最大 12.6MB / 6623×9362px）あった。

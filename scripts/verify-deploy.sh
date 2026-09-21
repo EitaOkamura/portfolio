@@ -60,6 +60,18 @@ echo "== SPA のルーティング =="
 code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "https://${DOMAIN}/works/raspberry-pi" 2>/dev/null || echo 000)
 [ "$code" = "200" ] && ok "詳細ページの直リンクが開ける" || ng "直リンクが 200 にならない ($code)"
 
+echo "== 問い合わせ API =="
+# 本文は送らない。到達と入力検証だけを見る。
+code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "https://${DOMAIN}/api/contact" \
+  -H 'content-type: application/json' -H "origin: https://${DOMAIN}" \
+  -d '{"name":"verify","email":"not-an-email"}' 2>/dev/null || echo 000)
+[ "$code" = "400" ] && ok "入力検証が効いている ($code)" || ng "想定外の応答 ($code)"
+
+code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "https://${DOMAIN}/api/contact" \
+  -H 'content-type: application/json' -H 'origin: https://evil.example' \
+  -d '{"name":"verify","email":"a@example.com"}' 2>/dev/null || echo 000)
+[ "$code" = "403" ] && ok "別オリジンからの送信を拒否する ($code)" || ng "別オリジンが通ってしまう ($code)"
+
 echo "== 中身が配信されているか =="
 curl -sS --max-time 10 "https://${DOMAIN}/" 2>/dev/null | grep -q '<div id="root">' \
   && ok "index.html が返っている" || ng "index.html の中身が想定と違う"

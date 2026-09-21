@@ -51,6 +51,16 @@ make infra    # CloudFormation テンプレートの構文確認だけ
 - **CloudFront の全消し (`--paths "/*"`) をしない。** 無効化は 1000 パス/月まで無料。
   ファイル名にハッシュが付かないものだけ指定すれば足りる
 - 構成を変えたら `./scripts/verify-deploy.sh` を流す。**結果を見ずに完了と言わない**
+- **インラインの Lambda コードは CommonJS で書く。** `Code.ZipFile` は
+  `index.js` として保存されるため、`import` / `export` を書くと初期化に失敗する。
+  `make check` が検査する
+- **CloudFront のカスタムエラー応答はディストリビューション全体に効く。**
+  403 を `/index.html` に流すと `/api/*` のエラーまで飲み込む。
+  今は 404 だけを流し、S3 には `s3:ListBucket` を与えて存在しないキーが
+  404 で返るようにしてある（バケットは非公開のまま）
+- **DNS レコードを消す前に、参照元を別ゾーンまで探す。** このドメインは
+  ホストゾーンが重複していて、削除しようとしたリソースを別ゾーンが
+  参照していた。レジストラの委任先 NS まで遡って確認すること
 - **IAM の Description に日本語を書かない。** ASCII と Latin-1 しか通らず
   スタックが CREATE_FAILED になる。CloudFront は日本語を受け付けるので、
   サービスごとに制約が違う
@@ -66,6 +76,10 @@ make infra    # CloudFormation テンプレートの構文確認だけ
 - **AWS の公開設定の修正: 適用済み。** `./scripts/verify-deploy.sh` は全項目通過。
   適用した内容は [docs/aws-migration.md](docs/aws-migration.md) の 10 節
 - 本番配信: 完了。https://etaolab.com/ は React 版が出ている
+- 問い合わせフォーム: 稼働中。`/api/contact` -> API Gateway -> Lambda -> SES。
+  実際にメールが届くことを確認済み。経緯は
+  [docs/aws-migration.md](docs/aws-migration.md) の 12 節
+- ホストゾーンの重複を解消済み（13 節）。残り1つ
 - 操作は IAM ユーザー `etaolab-admin`（MFA 強制）で行う。**ルートは使わない**
 - **GitHub Actions: 稼働中。** main への push でデプロイされ、
   公開状態の検証まで通ることを確認済み。
@@ -79,6 +93,9 @@ make infra    # CloudFormation テンプレートの構文確認だけ
 | CloudFront | `E3OYIZGQS2R1BB` |
 | OAC | `E5S251M5I6TYV` |
 | Response Headers Policy | `2469581e-5989-4832-b1de-afc4be27cbe0` |
+| Route 53 ホストゾーン | `Z10415952ASHZZKWOEJEC` |
+| 問い合わせ HTTP API | `7ru086saj7` |
+| 問い合わせ Lambda | `etaolab-contact-contact` |
 | AWS プロファイル | `etaolab`（`aws login` で更新。アクセスキーは無い） |
 
 <!-- BEGIN AWS Agent Toolkit rules -->

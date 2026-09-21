@@ -553,3 +553,139 @@ aws cloudtrail lookup-events \
   --max-results 1 --query 'Events[0].CloudTrailEvent' --output text \
   | python3 -m json.tool
 ```
+
+---
+
+## 12. 問い合わせフォームの作り直し（2026-09-21）
+
+### なぜ作り直したか
+
+旧構成は Google フォームへ非表示 iframe 経由で POST していた。
+届かない事象が起きたが、**方式そのものが検証不能**だった。
+
+- クロスオリジンなので iframe の中身を読めず、送信結果が分からない
+- 失敗しても画面上は成功に見える
+- Google フォームは既定でメール通知を送らないため、
+  「送信が失敗した」のか「送信は成功したが通知が無い」のか切り分けられない
+
+フォームの ID と entry ID を確認したところ設定自体は一致しており、
+設定ミスではなく方式の問題だった。
+
+### 最終的な構成
+
+```
+ブラウザ ──POST /api/contact──> CloudFront ──> API Gateway (HTTP API) ──> Lambda ──> SES
+          (同一オリジン。CORS 不要)                                                    ↓
+                                                                      okamura.job888@gmail.com
+                                                                      Reply-To: 問い合わせ者
+```
+
+| 種別 | 識別子 |
+|---|---|
+| スタック | `etaolab-contact` |
+| HTTP API | `7ru086saj7` |
+| Lambda | `etaolab-contact-contact` (nodejs22.x) |
+| SES 送信元 | `noreply@etaolab.com`（ドメイン検証 + Easy DKIM） |
+| SES 宛先 | `okamura.job888@gmail.com`（サンドボックスのため個別検証） |
+
+### 費用
+
+| 項目 | 料金 |
+|---|---|
+| Lambda | 月100万リクエストまで無料（無期限） |
+| API Gateway HTTP API | 100万リクエストあたり $1.00 |
+| SES | 1,000通あたり $0.10。サンドボックスなので1日200通が上限 |
+| CloudWatch Logs | 保持14日に設定済み |
+
+問い合わせフォームの利用量では実質ゼロ。
+
+### 濫用への備え
+
+- Lambda 側で `Origin` ヘッダを検証（`https://etaolab.com` 以外は 403）
+- 罠フィールド（`website`）。埋まっていたら成功を装って捨てる
+- アカウントの Lambda 同時実行上限 10
+- SES サンドボックスの 1 日 200 通（解除しない。上限として働かせる）
+- IAM で宛先を1アドレスに固定（`ForAllValues:StringEquals` + `ses:Recipients`）
+
+### 採用しなかった方式と、その理由
+
+**Lambda Function URL（パブリック / AuthType NONE）**
+
+リソースポリシーを正しく付けても 403 になり、**Lambda のログに
+1件も記録されない**。認可層で遮断されている。CloudFormation 経由でも
+`aws lambda add-permission` でも同じ。組織にも属しておらず SCP も無い。
+
+**CloudFront + OAC → Lambda Function URL（AuthType AWS_IAM）**
+
+POST が `The request signature we calculated does not match` で 403 になる。
+OAC はリクエストボディを署名に含めないため。CloudFront Functions で
+`x-amz-content-sha256: UNSIGNED-PAYLOAD` を付ける定番の回避策も効かなかった。
+
+この2つで行き詰まり、署名の要らない HTTP API に切り替えた。
+
+### つまずいた点
+
+**1. インラインの Lambda コードは CommonJS で書く**
+
+`AWS::Lambda::Function` の `Code.ZipFile` は `index.js` として保存されるため
+CommonJS として評価される。`import` / `export` を書くと
+`Cannot use import statement outside a module` で初期化に失敗する。
+
+`scripts/validate-infra.mjs` が検査するようにしたが、`node --check` だけでは
+不十分だった。最近の Node は `.js` でも ESM を自動判定して通してしまう。
+構文を直接見る判定を足してある。
+
+**2. `403 → /index.html` が API のエラーを覆い隠す**
+
+SPA のルーティング用に 403 と 404 の両方を `/index.html`（200）に
+流していたため、`/api/*` が返す 403 まで index.html になり、
+原因が全く見えなかった。
+
+CloudFront に `s3:ListBucket` を与えると、存在しないキーが
+403 ではなく 404 で返るようになる。これで 404 のルールだけで
+SPA のルーティングが成立し、API のエラーが素通しになる。
+**バケットは非公開のまま**（`ListBucket` を許可したのは
+CloudFront のサービスプリンシパルに対してのみ）。
+
+**3. `ses:Recipients` は複数値を取る条件キー**
+
+`StringEquals` 単体では一致せず `AccessDenied` になる。
+`ForAllValues:StringEquals` を使う。
+
+**4. サンドボックスでは送信元と宛先の両方の ID に権限が要る**
+
+`ses:SendEmail` の `Resource` に送信元ドメインだけを書くと、
+宛先 ID で `AccessDenied` になる。両方を並べる。
+
+エラーは `is not authorized to perform ses:SendEmail on resource ...` と
+しか言わないので、**resource の部分を読んでどちらの ID で落ちているか
+判断する**。1つ目を直すと resource が送信元から宛先に変わり、
+2つ目の問題が見える。
+
+---
+
+## 13. ホストゾーンの重複を解消（2026-09-21）
+
+`etaolab.com` のホストゾーンが**2つ**存在していた。
+
+| ゾーン | NS | A レコード | 判定 |
+|---|---|---|---|
+| `Z10415952ASHZZKWOEJEC` | レジストラの委任先と一致 | 本番の CloudFront | 稼働中 |
+| `Z00983493GUC8J93M3JKW` | 一致しない | 無効化済みの古い CloudFront | 孤立 |
+
+孤立したゾーンが**月 $0.50（年 $6）を消費していた**ため削除した。
+
+削除前に確認したこと:
+
+- `aws route53domains get-domain-detail` でレジストラの委任先 NS を確認し、
+  稼働中ゾーンの NS と一致することを確かめた
+- **ACM の検証用 CNAME が稼働中ゾーンにも存在すること**を確認した。
+  孤立ゾーンにしか無いと証明書の自動更新が失敗する
+- 削除前のレコード一覧を `workbench/aws-rollback/` に保存した
+
+Route 53 は NS と SOA 以外のレコードが残っていると
+ホストゾーンを削除できないので、先にそれらを消す。
+
+**古いディストリビューションを消す前にここに気づいたのは偶然だった。**
+削除対象を参照している DNS レコードが別ゾーンにあったため、
+「使われていない」と判断する前に委任先まで遡る必要があった。
