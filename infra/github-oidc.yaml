@@ -21,7 +21,18 @@ Parameters:
   GitHubBranch:
     Type: String
     Default: main
-    Description: デプロイを許可するブランチ。ここ以外からは引き受けられない
+    Description: >
+      デプロイを許可するブランチ。GitHubEnvironment が空のときだけ使われる。
+
+  GitHubEnvironment:
+    Type: String
+    Default: production
+    Description: >
+      ワークフローが `environment:` を指定している場合、その名前。
+      指定があると GitHub が発行するトークンの sub は
+      `repo:owner/repo:environment:<名前>` になり、ブランチ名は入らない。
+      そのため「main からのみ」の制限は GitHub 側の environment の
+      デプロイブランチ設定で行うこと。空にするとブランチ形式の sub になる。
   SiteBucketName:
     Type: String
     Description: デプロイ先の S3 バケット名
@@ -39,6 +50,7 @@ Parameters:
 
 Conditions:
   ShouldCreateProvider: !Equals [!Ref CreateOidcProvider, 'true']
+  UseEnvironmentSubject: !Not [!Equals [!Ref GitHubEnvironment, '']]
 
 Resources:
   GitHubOidcProvider:
@@ -78,7 +90,14 @@ Resources:
                 'token.actions.githubusercontent.com:aud': sts.amazonaws.com
                 # ここを緩めないこと。sub を絞らないと、他人のリポジトリからでも
                 # このロールを引き受けられてしまう。
-                'token.actions.githubusercontent.com:sub': !Sub 'repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+                #
+                # ワークフローが `environment:` を指定していると、GitHub が発行する
+                # トークンの sub は ref 形式ではなく environment 形式になる。
+                # 形式が合っていないと sts:AssumeRoleWithWebIdentity が拒否される。
+                'token.actions.githubusercontent.com:sub': !If
+                  - UseEnvironmentSubject
+                  - !Sub 'repo:${GitHubOwner}/${GitHubRepo}:environment:${GitHubEnvironment}'
+                  - !Sub 'repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
       Policies:
         - PolicyName: deploy-site
           PolicyDocument:
