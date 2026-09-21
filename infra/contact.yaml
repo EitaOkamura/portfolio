@@ -112,9 +112,17 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: ses:SendEmail
-                Resource: !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${DomainName}'
+                # サンドボックスでは宛先も検証済み ID である必要があり、
+                # SES は送信元と宛先の両方の ID を認可対象にする。
+                # 送信元だけ許可すると宛先側で AccessDenied になる。
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${DomainName}'
+                  - !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${RecipientEmail}'
                 Condition:
-                  StringEquals:
+                  # ses:Recipients は複数値を取るキーなので、StringEquals 単体では
+                  # 一致せず AccessDenied になる。ForAllValues を付けて
+                  # 「宛先すべてがこのアドレスであること」を要求する。
+                  'ForAllValues:StringEquals':
                     # 乗っ取られても、この宛先以外には送れない
                     'ses:Recipients': !Ref RecipientEmail
               - Effect: Allow
