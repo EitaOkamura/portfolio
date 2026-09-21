@@ -115,7 +115,8 @@ Resources:
     Properties:
       OriginAccessControlConfig:
         Name: !Sub '${AWS::StackName}-oac'
-        Description: !Sub '${DomainName} の配信元へのアクセス制御'
+        # 実際に作成済みの OAC (E5S251M5I6TYV) に合わせて ASCII にしている
+        Description: !Sub '${DomainName} origin access control'
         OriginAccessControlOriginType: s3
         SigningBehavior: always
         SigningProtocol: sigv4

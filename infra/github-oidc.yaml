@@ -57,7 +57,11 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${GitHubRepo}-github-deploy'
-      Description: !Sub 'GitHub Actions (${GitHubOwner}/${GitHubRepo}) からのデプロイ用'
+      # IAM の Description は ASCII と Latin-1 しか受け付けない
+      # ([\u0009\u000A\u000D\u0020-\u007E\u00A1-\u00FF])。日本語を入れると
+      # CREATE_FAILED になる。CloudFormation の Parameters/Outputs の
+      # Description は CloudFormation 側の値なので日本語で構わない。
+      Description: !Sub 'Deploy role for GitHub Actions (${GitHubOwner}/${GitHubRepo})'
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
