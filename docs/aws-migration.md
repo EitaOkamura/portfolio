@@ -295,12 +295,29 @@ aws cloudfront create-invalidation --distribution-id <DISTRIBUTION_ID> \
   --paths "/" "/index.html" "/favicon.svg"
 ```
 
+### ⚠️ `--delete` の前にバックアップを取る
+
 **旧サイトのファイル**（`CSS/`、`JavaScript/`、`*.html`、`images/**/*.png|jpg`）は
-`--delete` で消える。消えて困るものが無いか、事前に確認すること:
+`--delete` で消える。
+
+`workbench/legacy-site-backup/` に、公開中のサイトから辿って取得した
+50 ファイル / 48MB がある（詳細はそこの README）。ただしこれは
+**バケットの完全なコピーではない**。`ListBucket` が拒否されているため
+中身を列挙できず、どのページからも参照されていないファイルは入っていない。
+
+配信の前に、認証情報がある環境で必ず完全なコピーを取ること:
 
 ```bash
-aws s3 ls s3://etaolab.com/ --recursive --human-readable --summarize > /tmp/before.txt
+# 何があるかを見る
+aws s3 ls s3://etaolab.com/ --recursive --human-readable --summarize
+
+# 丸ごと落とす。これをやってから sync すること
+aws s3 sync s3://etaolab.com ./legacy-site-full-backup
 ```
+
+移行後は `infra/site.yaml` がバージョニングを有効にするので、
+上書き・削除から 30 日は戻せるようになる。
+それまでの間はこの手動バックアップだけが頼り。
 
 これを自動化したものが `.github/workflows/deploy.yml`。
 
